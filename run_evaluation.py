@@ -3,6 +3,8 @@
 Format: python3 run_evaluation.py --model ... --dataset ... --fewshot-dataset ... --output_file_name ...
 """
 import argparse
+from dotenv import load_dotenv
+load_dotenv()
 from evaluate import evaluate_all, evaluate_baseline
 from datasets.abstract_dataset_loader import DatasetLoader
 from models.abstract_model import AbstractModel
@@ -12,6 +14,16 @@ from datetime import datetime
 from postprocess import postprocess_all, postprocess_all_baseline
 import json
 
+class DatasetSlice:
+    """Wraps a DatasetLoader and limits the number of items returned."""
+    def __init__(self, dataset, max_samples):
+        self._items = list(dataset.items())[:max_samples]
+        self.length = len(self._items)
+
+    def items(self):
+        return iter(self._items)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Process model and dataset flags.")
     parser.add_argument('--model', type=str, help='Model to use. Possible options: ' + ', '.join(AbstractModel.registered_models) + '.')
@@ -19,6 +31,7 @@ def main():
     parser.add_argument('--fewshot-dataset', type=str, help='Dataset to use to collect few-shot examples. Possible options: ' + ', '.join(DatasetLoader.registered_datasets) + '.', default="morehopqa")
     parser.add_argument('--strategy', type=str, help="Prompting strategy to use. Possible options: zeroshot, zeroshot-cot, 2-shot, 2-shot-cot, 3-shot, 3-shot-cot")
     parser.add_argument('--output_file', type=str, help='First part of the name of the output file. Will also include model, strategy, dataset and timestamp. Default: output')
+    parser.add_argument('--max-samples', type=int, default=None, help='Limit evaluation to the first N samples (useful for quick tests).')
 
     args = parser.parse_args()
 
@@ -30,6 +43,8 @@ def main():
         sys.exit(1)
 
     dataset = DatasetLoader.create(args.dataset)
+    if args.max_samples is not None:
+        dataset = DatasetSlice(dataset, args.max_samples)
     fewshot_dataset = DatasetLoader.create(args.fewshot_dataset)
     prompt_generator = PromptGenerator.create(args.strategy, fewshot_dataset)
     model = AbstractModel.create(args.model, args.output_file, prompt_generator) if args.output_file is not None else AbstractModel.create(model_name=args.model, output_file_name="output")
