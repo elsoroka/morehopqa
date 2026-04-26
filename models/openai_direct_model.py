@@ -45,21 +45,23 @@ class OpenAIDirectModel(AbstractModel):
         self.prompt_generator = prompt_generator
 
     def generate_text(self, prompt, max_tokens=256):
-        return self.model.chat.completions.create(
+        response = self.model.chat.completions.create(
             model=self.model_name,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": prompt}
             ],
             max_tokens=max_tokens
-        ).choices[0].message.content
-    
+        )
+        usage = response.usage
+        return response.choices[0].message.content, usage.prompt_tokens, usage.completion_tokens
+
     def get_prompt(self, question_entry, context, question):
         return self.prompt_generator.get_prompt(question_entry, context, question)
 
     def get_answer(self, prompt):
         return self.generate_text(prompt)
-    
+
     def get_all_cases(self, entry):
         cases = dict()
         context = entry["context"]
@@ -74,20 +76,27 @@ class OpenAIDirectModel(AbstractModel):
 
     def get_answers_and_cache(self, dataset):
         answers = dict()
+        total_tokens_in = 0
+        total_tokens_out = 0
         for entry in tqdm(dataset.items(), total=dataset.length):
             cases = self.get_all_cases(entry)
             answer_entry = dict()
             answer_entry["_id"] = entry["_id"]
             answer_entry["context"] = entry["context"]
             for case_id, prompt in cases.items():
-                answer = self.get_answer(prompt)
+                answer, tokens_in, tokens_out = self.get_answer(prompt)
                 answer_entry[f"{case_id}_prompt"] = prompt
                 answer_entry[f"{case_id}_answer"] = answer
-                
+                answer_entry[f"{case_id}_tokens_in"] = tokens_in
+                answer_entry[f"{case_id}_tokens_out"] = tokens_out
+                total_tokens_in += tokens_in
+                total_tokens_out += tokens_out
+
             answers[entry["_id"]] = answer_entry
             with open(f"models/cached_answers/{self.output_file_name}", "w") as f:
                 json.dump(answers, f, indent=4)
 
+        print(f"\nToken usage — input: {total_tokens_in:,}  output: {total_tokens_out:,}  total: {total_tokens_in + total_tokens_out:,}")
         return answers
     
 def main():

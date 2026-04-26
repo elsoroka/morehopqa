@@ -51,14 +51,16 @@ class OpenAIPlanModel(AbstractModel):
         self.prompt_generator = prompt_generator
 
     def _call(self, user_content, max_tokens=512):
-        return self.client.chat.completions.create(
+        response = self.client.chat.completions.create(
             model=self.model_name,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": user_content},
             ],
             max_tokens=max_tokens,
-        ).choices[0].message.content
+        )
+        usage = response.usage
+        return response.choices[0].message.content, usage.prompt_tokens, usage.completion_tokens
 
     def get_plan(self, base_prompt):
         """First call: ask the model to plan, not answer."""
@@ -85,19 +87,39 @@ class OpenAIPlanModel(AbstractModel):
 
     def get_answers_and_cache(self, dataset) -> dict:
         answers = dict()
+        total_plan_tokens_in = 0
+        total_plan_tokens_out = 0
+        total_answer_tokens_in = 0
+        total_answer_tokens_out = 0
         for entry in tqdm(dataset.items(), total=dataset.length):
             cases = self.get_all_cases(entry)
             answer_entry = {"_id": entry["_id"], "context": entry["context"]}
 
             for case_id, prompt in cases.items():
-                plan = self.get_plan(prompt)
-                answer = self.get_answer(prompt, plan)
+                plan, plan_tokens_in, plan_tokens_out = self.get_plan(prompt)
+                answer, answer_tokens_in, answer_tokens_out = self.get_answer(prompt, plan)
                 answer_entry[f"{case_id}_prompt"] = prompt
                 answer_entry[f"{case_id}_plan"] = plan
                 answer_entry[f"{case_id}_answer"] = answer
+                answer_entry[f"{case_id}_plan_tokens_in"] = plan_tokens_in
+                answer_entry[f"{case_id}_plan_tokens_out"] = plan_tokens_out
+                answer_entry[f"{case_id}_answer_tokens_in"] = answer_tokens_in
+                answer_entry[f"{case_id}_answer_tokens_out"] = answer_tokens_out
+                total_plan_tokens_in += plan_tokens_in
+                total_plan_tokens_out += plan_tokens_out
+                total_answer_tokens_in += answer_tokens_in
+                total_answer_tokens_out += answer_tokens_out
 
             answers[entry["_id"]] = answer_entry
             with open(f"models/cached_answers/{self.output_file_name}", "w") as f:
                 json.dump(answers, f, indent=4)
 
+        total_in = total_plan_tokens_in + total_answer_tokens_in
+        total_out = total_plan_tokens_out + total_answer_tokens_out
+        print(
+            f"\nToken usage:"
+            f"\n  Plan calls   — input: {total_plan_tokens_in:,}  output: {total_plan_tokens_out:,}"
+            f"\n  Answer calls — input: {total_answer_tokens_in:,}  output: {total_answer_tokens_out:,}"
+            f"\n  Total        — input: {total_in:,}  output: {total_out:,}  total: {total_in + total_out:,}"
+        )
         return answers
