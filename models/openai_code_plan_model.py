@@ -80,9 +80,10 @@ class OpenAICodePlanModel(AbstractModel):
         self.model_name = model_name.replace("-code-plan", "")
         self.output_file_name = output_file_name
         self.prompt_generator = prompt_generator
-        # Per-case token counters, updated by self.prompt() during exec
+        # Per-case token counters and sub-call log, updated by self.prompt() during exec
         self._answer_tokens_in = 0
         self._answer_tokens_out = 0
+        self._sub_calls = []  # list of {"prompt": ..., "response": ...} per case
 
     def clean_answer(self, answer: str) -> str:
         m = re.search(r'<answer>(.*?)</answer>', answer, re.IGNORECASE | re.DOTALL)
@@ -152,6 +153,8 @@ class OpenAICodePlanModel(AbstractModel):
         response, tok_in, tok_out = self._call(prompt, max_tokens=512)
         self._answer_tokens_in += tok_in
         self._answer_tokens_out += tok_out
+        self._sub_calls.append({"prompt": prompt, "response": response,
+                                 "tokens_in": tok_in, "tokens_out": tok_out})
         return response
 
     def get_prompt(self, question_entry, context, question):
@@ -184,6 +187,7 @@ class OpenAICodePlanModel(AbstractModel):
             for case_id, (prompt, question) in cases.items():
                 self._answer_tokens_in = 0
                 self._answer_tokens_out = 0
+                self._sub_calls = []
 
                 plan, plan_tokens_in, plan_tokens_out, planner_prompt, valid_plan = self.get_plan(prompt)
                 total_plan_tokens_in += plan_tokens_in
@@ -218,6 +222,7 @@ class OpenAICodePlanModel(AbstractModel):
 
                     print("Result of execution:", result)
                     answer_entry[f"{case_id}_answer"] = result
+                    answer_entry[f"{case_id}_sub_calls"] = self._sub_calls
                     answer_entry[f"{case_id}_answer_tokens_in"] = self._answer_tokens_in
                     answer_entry[f"{case_id}_answer_tokens_out"] = self._answer_tokens_out
                     total_answer_tokens_in += self._answer_tokens_in
