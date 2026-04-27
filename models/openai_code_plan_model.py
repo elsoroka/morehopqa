@@ -192,6 +192,8 @@ class OpenAICodePlanModel(AbstractModel):
                 answer_entry[f"{case_id}_prompt"] = prompt
                 answer_entry[f"{case_id}_plan"] = plan
                 answer_entry[f"{case_id}_planner_prompt"] = planner_prompt
+                answer_entry[f"{case_id}_plan_tokens_in"] = plan_tokens_in
+                answer_entry[f"{case_id}_plan_tokens_out"] = plan_tokens_out
 
                 if not valid_plan:
                     answer_entry[f"{case_id}_answer"] = None
