@@ -44,16 +44,14 @@ Answer as short as possible.
 
 
 class OpenAIPlanModel(AbstractModel):
-    def __init__(self, model_name="gpt-4o-plan", output_file_name="output", provider="openai", prompt_generator=None):
+    def __init__(self, model_name="gpt-4.1", output_file_name="output", provider="openai", prompt_generator=None):
         if provider == "openai":
             self.client = OpenAI()
         elif provider == "vllm":
-            # TODO: Implement VLLM support
-            pass
+            self.client = OpenAI(base_url="http://localhost:8000/v1", api_key="placeholder")
         else:
             raise ValueError(f"Invalid provider: {provider}")
-        
-        self.model_name = model_name.replace("-plan", "")
+        self.model_name = model_name
         self.output_file_name = output_file_name
         self.prompt_generator = prompt_generator
 

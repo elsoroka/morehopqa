@@ -38,9 +38,14 @@ Answer as short as possible.
 """
 
 class OpenAIDirectModel(AbstractModel):
-    def __init__(self, model_name="gpt-3.5-turbo", output_file_name="output", prompt_generator=None):
-        self.model = OpenAI()
-        self.model_name = model_name.replace("-direct", "")
+    def __init__(self, model_name="gpt-4.1", output_file_name="output", prompt_generator=None, provider="openai"):
+        if provider == "openai":
+            self.model = OpenAI()
+        elif provider == "vllm":
+            self.model = OpenAI(base_url="http://localhost:8000/v1", api_key="placeholder")
+        else:
+            raise ValueError(f"Invalid provider: {provider}")
+        self.model_name = model_name
         self.output_file_name =  output_file_name
         self.prompt_generator = prompt_generator
 

@@ -1,6 +1,6 @@
 """Run evaluation on dataset
 
-Format: python3 run_evaluation.py --model ... --dataset ... --fewshot-dataset ... --output_file_name ...
+Format: python3 run_evaluation.py --model ... --mode ... --provider ... --dataset ... --strategy ...
 """
 import argparse
 import os
@@ -27,18 +27,22 @@ class DatasetSlice:
 
 def main():
     parser = argparse.ArgumentParser(description="Process model and dataset flags.")
-    parser.add_argument('--model', type=str, help='Model to use. Possible options: ' + ', '.join(AbstractModel.registered_models) + '.')
+    parser.add_argument('--model', type=str, help='Model name to use (e.g. gpt-4.1, Qwen/Qwen3-coder-next). Use "baseline" for the retrieval baseline.')
+    parser.add_argument('--mode', type=str, default="default", help='Prompting mode: default, plan, or code-plan. Default: default.')
+    parser.add_argument('--provider', type=str, default="openai", help='Model provider: openai (default) or vllm (localhost:8000).')
     parser.add_argument('--dataset', type=str, help='Dataset to use. Possible options: ' + ', '.join(DatasetLoader.registered_datasets) + '.')
     parser.add_argument('--fewshot-dataset', type=str, help='Dataset to use to collect few-shot examples. Possible options: ' + ', '.join(DatasetLoader.registered_datasets) + '.', default="morehopqa")
     parser.add_argument('--strategy', type=str, help="Prompting strategy to use. Possible options: zeroshot, zeroshot-cot, 2-shot, 2-shot-cot, 3-shot, 3-shot-cot")
-    parser.add_argument('--output_file', type=str, help='First part of the name of the output file. Will also include model, strategy, dataset and timestamp. Default: output')
+    parser.add_argument('--output_file', type=str, help='First part of the name of the output file. Will also include model, mode, strategy, dataset and timestamp. Default: output')
     parser.add_argument('--max-samples', type=int, default=None, help='Limit evaluation to the first N samples (useful for quick tests).')
 
     args = parser.parse_args()
 
     if args.model is None or args.dataset is None or args.strategy is None:
         print("Missing arguments. Here are the possible options:")
-        print("For --model: " + ", ".join(AbstractModel.registered_models))
+        print("For --model: any OpenAI model name (e.g. gpt-4.1) or vLLM-served model name (e.g. Qwen/Qwen3-coder-next), or 'baseline'")
+        print("For --mode: default, plan, code-plan")
+        print("For --provider: openai, vllm")
         print("For --dataset: " + ", ".join(DatasetLoader.registered_datasets))
         print("For --strategy: zeroshot, zeroshot-cot, 2-shot, 2-shot-cot, 3-shot, 3-shot-cot")
         sys.exit(1)
@@ -48,9 +52,18 @@ def main():
         dataset = DatasetSlice(dataset, args.max_samples)
     fewshot_dataset = DatasetLoader.create(args.fewshot_dataset)
     prompt_generator = PromptGenerator.create(args.strategy, fewshot_dataset)
-    model = AbstractModel.create(args.model, args.output_file, prompt_generator) if args.output_file is not None else AbstractModel.create(model_name=args.model, output_file_name="output")
+    output_file_name = args.output_file if args.output_file is not None else "output"
+    model = AbstractModel.create(
+        model_name=args.model,
+        output_file_name=output_file_name,
+        prompt_generator=prompt_generator,
+        mode=args.mode,
+        provider=args.provider,
+    )
 
     print(f"Using model: {args.model}")
+    print(f"Using mode: {args.mode}")
+    print(f"Using provider: {args.provider}")
     print(f"Using strategy: {args.strategy}")
     print(f"Using dataset: {args.dataset}")
     print(f"Using few-shot dataset: {args.fewshot_dataset}")
@@ -64,10 +77,14 @@ def main():
         postprocessed = postprocess_all(answers, dataset)
         results = evaluate_all(postprocessed)
 
+    # Sanitize model name for use in filename (replace / with -)
+    model_slug = args.model.replace("/", "-")
     output_str = f"""
 
     Evaluation done. Results:
     - Model: {args.model}
+    - Mode: {args.mode}
+    - Provider: {args.provider}
     - Dataset: {args.dataset}
     - Strategy: {args.strategy}
 
@@ -84,7 +101,7 @@ def main():
 
     print(output_str)
 
-    output_file = f"results/{args.output_file}_{args.model}_{args.strategy}_{args.dataset}_{datetime.now().strftime('%y%m%d-%H%M%S')}.jsonl"
+    output_file = f"results/{output_file_name}_{model_slug}_{args.mode}_{args.strategy}_{args.dataset}_{datetime.now().strftime('%y%m%d-%H%M%S')}.jsonl"
     i = 1
     original_output_file = output_file
     while os.path.exists(output_file):
@@ -92,7 +109,7 @@ def main():
         print("WARNING: File already exists. Will not overwrite.")
         output_file = original_output_file + f"_{i}.jsonl"
         i += 1
-    
+
     with open(output_file, "w") as f:
         for entry_id, entry_results in results.items():
             f.write(json.dumps({"_id": entry_id, **entry_results}) + "\n")
