@@ -89,13 +89,14 @@ class OpenAICodePlanModel(AbstractModel):
         m = re.search(r'<answer>(.*?)</answer>', answer, re.IGNORECASE | re.DOTALL)
         return m.group(1).strip() if m else answer.strip()
 
-    def _call(self, user_content, max_tokens=1024):
+    def _call(self, user_content, max_tokens=1024, system_prompt=SYSTEM_PROMPT):
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": user_content})
         response = self.client.chat.completions.create(
             model=self.model_name,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_content},
-            ],
+            messages=messages,
             max_tokens=max_tokens,
         )
         usage = response.usage
@@ -114,7 +115,7 @@ class OpenAICodePlanModel(AbstractModel):
             if error_message:
                 planner_prompt += f"\nError from previous attempt: {error_message}\nPlease fix the code and try again."
 
-            raw, tok_in, tok_out = self._call(planner_prompt, max_tokens=512)
+            raw, tok_in, tok_out = self._call(planner_prompt, max_tokens=512, system_prompt=None)
             plan_tokens_in += tok_in
             plan_tokens_out += tok_out
             print("Raw plan:", raw)
@@ -221,6 +222,7 @@ class OpenAICodePlanModel(AbstractModel):
                         result = None
 
                     print("Result of execution:", result)
+                    print("Correctness of execution:", result == entry["answer"])
                     answer_entry[f"{case_id}_answer"] = result
                     answer_entry[f"{case_id}_sub_calls"] = self._sub_calls
                     answer_entry[f"{case_id}_answer_tokens_in"] = self._answer_tokens_in
