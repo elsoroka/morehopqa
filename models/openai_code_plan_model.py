@@ -183,6 +183,7 @@ class OpenAICodePlanModel(AbstractModel):
 
         for entry in tqdm(dataset.items(), total=dataset.length):
             cases = self.get_all_cases(entry)
+            print(entry.keys())
             answer_entry = {"_id": entry["_id"], "context": entry["context"]}
 
             for case_id, (prompt, question) in cases.items():
@@ -211,7 +212,7 @@ class OpenAICodePlanModel(AbstractModel):
                         "clean_answer": self.clean_answer,
                         "llm": self,
                         "question": question,
-                        "context": entry["context"],
+                        "context": '\n\n'.join(entry["context"]),
                     }
                     local_vars = {}
                     try:
@@ -221,8 +222,16 @@ class OpenAICodePlanModel(AbstractModel):
                         print(f"Exec error for {case_id}: {e}")
                         result = None
 
+                    correct_answer = {
+                        "case_1": entry["answer"],
+                        "case_2": entry["previous_answer"],
+                        "case_3": entry["answer"],
+                        "case_4": entry["answer"],
+                        "case_5": entry["previous_answer"],
+                        "case_6": entry["question_decomposition"][0]["answer"],
+                    }[case_id]
                     print("Result of execution:", result)
-                    print("Correctness of execution:", result == entry["answer"])
+                    print("Correct answer:", correct_answer)
                     answer_entry[f"{case_id}_answer"] = result
                     answer_entry[f"{case_id}_sub_calls"] = self._sub_calls
                     answer_entry[f"{case_id}_answer_tokens_in"] = self._answer_tokens_in
