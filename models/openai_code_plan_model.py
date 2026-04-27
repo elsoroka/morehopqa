@@ -36,12 +36,12 @@ Write a concise step-by-step plan as a Python function `answer_question()->str:`
 * a string variable `question` that contains the exact question you need to answer
 * a string variable `context` that contains the exact context you were provided to answer the question.
 * a function `clean_date(date_str:str)->datetime.date:` that will extract and parse a date string into a datetime.date object.
-* a function `clean_answer(answer:str)->str:` that extracts and returns the answer text from <answer>...</answer> tags if present, or returns the stripped text as-is.
+* a function `clean_answer(answer:str)->str:` that wraps text in <answer>...</answer> tags, normalizing any existing tags if present.
 * all built-in Python functions and libraries
 
 Hints:
 * Break the question into smaller steps.
-* Your plan must return the final answer as a plain string (e.g. '42', '2020-03-15', 'yes').
+* Your plan must return the final answer wrapped in <answer>...</answer> tags using clean_answer.
 * Do not assume llm.prompt() can return valid JSON.
 * Remember that the LLM will only see the prompt you write, so write your prompts carefully and include all necessary context to solve the step. You can use the `context` and `question` variables to help you write prompts for `llm.prompt()`.
 * Remember that llm.prompt() can only return text output, so if you need any other data type you must convert it yourself.
@@ -52,10 +52,14 @@ Example plan:
 ```python
 def answer_question()->str:
     import datetime, re
-    last_date_str = clean_answer(llm.prompt(f"Find the last date mentioned in this text and return it as a string formatted as YYYY-MM-DD (ISO standard):\\nText:\\n{context}"))
+    def strip_tags(text):
+        import re
+        m = re.search(r'<answer>(.*?)</answer>', text, re.IGNORECASE | re.DOTALL)
+        return m.group(1).strip() if m else text.strip()
+    last_date_str = strip_tags(llm.prompt(f"Find the last date mentioned in this text and return it as a string formatted as YYYY-MM-DD (ISO standard):\\nText:\\n{context}"))
     last_date = datetime.datetime.strptime(last_date_str, "%Y-%m-%d").date()
     three_days_after = last_date + datetime.timedelta(days=3)
-    return three_days_after.strftime('%Y-%m-%d')
+    return clean_answer(three_days_after.strftime('%Y-%m-%d'))
 ```
 Do not answer the question yourself — only output the plan as a Python code block.
 """
@@ -66,7 +70,7 @@ If the answer is a name, your code should format it as Firstname Lastname.
 If the question is a yes or no question: your code should return 'yes' or 'no' (without quotes).
 If the answer contains any number, your code should format it as a string of digits.
 
-Your code should call the clean_answer function to strip any <answer> tags and extra formatting from the final answer string.
+Your code should call clean_answer on the final answer string to wrap it in <answer>...</answer> tags.
 """
 
 
@@ -87,8 +91,10 @@ class OpenAICodePlanModel(AbstractModel):
         self._sub_calls = []  # list of {"prompt": ..., "response": ...} per case
 
     def clean_answer(self, answer: str) -> str:
+        """Wrap answer in <answer> tags, extracting inner content first if tags are already present."""
         m = re.search(r'<answer>(.*?)</answer>', answer, re.IGNORECASE | re.DOTALL)
-        return m.group(1).strip() if m else answer.strip()
+        content = m.group(1).strip() if m else answer.strip()
+        return f"<answer>{content}</answer>"
 
     def _call(self, user_content, max_tokens=1024, system_prompt=SYSTEM_PROMPT):
         messages = []
