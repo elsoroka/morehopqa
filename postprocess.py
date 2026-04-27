@@ -24,6 +24,8 @@ def extract_and_parse_date(date_str):
 
 def parse_answer_tags(answer):
     """Return text content between <answer> and </answer> tags."""
+    if answer is None:
+        return None
     try:
         return re.match(r'.*<answer>(.*)</answer>.*', answer, re.IGNORECASE | re.DOTALL).group(1).strip()
     except AttributeError:
@@ -31,9 +33,11 @@ def parse_answer_tags(answer):
 
 
 def postprocess_date(answer):
-    """Compare two date answers. Try parsing the date and then compare. 
-   
+    """Compare two date answers. Try parsing the date and then compare.
+
     If the date is not in the right format, try NER to find the date in the text."""
+    if answer is None:
+        return None
     try:
         model_date = extract_and_parse_date(answer)
         return model_date.strftime("%Y-%m-%d %H:%M")
@@ -52,6 +56,8 @@ def postprocess_date(answer):
         
 
 def postprocess_number(answer):
+    if answer is None:
+        return None
     try:
         return str(float(answer.replace(",", "")))
     except ValueError:

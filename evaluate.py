@@ -13,6 +13,8 @@ nlp = spacy.load("en_core_web_sm", disable=["tagger", "parser", "attribute_ruler
 
 
 def normalize_answer(s):
+    if s is None:
+        return ""
 
     def remove_articles(text):
         return re.sub(r'\b(a|an|the)\b', ' ', text)
