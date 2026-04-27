@@ -44,13 +44,20 @@ Answer as short as possible.
 
 
 class OpenAIPlanModel(AbstractModel):
-    def __init__(self, model_name="gpt-4o-plan", output_file_name="output", prompt_generator=None):
-        self.client = OpenAI()
+    def __init__(self, model_name="gpt-4o-plan", output_file_name="output", provider="openai", prompt_generator=None):
+        if provider == "openai":
+            self.client = OpenAI()
+        elif provider == "vllm":
+            # TODO: Implement VLLM support
+            pass
+        else:
+            raise ValueError(f"Invalid provider: {provider}")
+        
         self.model_name = model_name.replace("-plan", "")
         self.output_file_name = output_file_name
         self.prompt_generator = prompt_generator
 
-    def _call(self, user_content, max_tokens=512):
+    def _call(self, user_content, max_tokens=1024):
         response = self.client.chat.completions.create(
             model=self.model_name,
             messages=[
@@ -64,12 +71,12 @@ class OpenAIPlanModel(AbstractModel):
 
     def get_plan(self, base_prompt):
         """First call: ask the model to plan, not answer."""
-        return self._call(base_prompt + PLAN_SUFFIX, max_tokens=256)
+        return self._call(base_prompt + PLAN_SUFFIX, max_tokens=512)
 
     def get_answer(self, base_prompt, plan):
         """Second call: inject the plan and get the final answer."""
         augmented_prompt = base_prompt + PLAN_INJECTION.format(plan=plan) + END_OF_PROMPT
-        return self._call(augmented_prompt, max_tokens=256)
+        return self._call(augmented_prompt, max_tokens=512)
 
     def get_prompt(self, question_entry, context, question):
         return self.prompt_generator.get_prompt(question_entry, context, question)

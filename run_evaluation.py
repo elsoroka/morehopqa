@@ -78,8 +78,9 @@ def main():
 
     print(output_str)
 
-    with open(f"results/{args.output_file}_{args.model}_{args.strategy}_{args.dataset}_{datetime.now().strftime('%y%m%d-%H%M%S')}.json", "w") as f:
-        json.dump(results, f, indent=4)
+    with open(f"results/{args.output_file}_{args.model}_{args.strategy}_{args.dataset}_{datetime.now().strftime('%y%m%d-%H%M%S')}.jsonl", "w") as f:
+        for entry_id, entry_results in results.items():
+            f.write(json.dumps({"_id": entry_id, **entry_results}) + "\n")
 
     print("Results written to file.")
 

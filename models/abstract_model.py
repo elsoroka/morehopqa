@@ -9,7 +9,7 @@ from datetime import datetime
 
 
 class AbstractModel(ABC):
-    registered_models = ["gpt-3.5-turbo-direct", "gpt-4-turbo-direct", "gpt-4o-direct", "gpt-4o-plan", "gemma-7b", "llama-8b", "llama-70b", "mistral-7b", "baseline"]
+    registered_models = ["gpt-3.5-turbo-direct", "gpt-4-turbo-direct", "gpt-4o-direct", "gpt-4o-plan", "gpt-4o-code-plan", "gemma-7b", "llama-8b", "llama-70b", "mistral-7b", "baseline"]
 
     @abstractmethod
     def get_answers_and_cache(self, dataset) -> dict:
@@ -24,6 +24,8 @@ class AbstractModel(ABC):
             from models.openai_direct_model import OpenAIDirectModel as cls
         elif model_name == "gpt-4o-plan":
             from models.openai_plan_model import OpenAIPlanModel as cls
+        elif model_name == "gpt-4o-code-plan":
+            from models.openai_code_plan_model import OpenAICodePlanModel as cls
         elif model_name == "gemma-7b":
             from models.gemma_7b import Gemma7B as cls
         elif model_name == "llama-8b":
