@@ -42,7 +42,7 @@ bash run_evaluation.sh
 Open `morehopqa/summarize_results.ipynb` in Jupyter.
 
 **Available options:**
-- `--model`: `gpt-3.5-turbo-direct`, `gpt-4-turbo-direct`, `gpt-4o-direct`, `gpt-4o-plan`, `gemma-7b`, `llama-8b`, `llama-70b`, `mistral-7b`, `baseline`
+- `--model`: `gpt-3.5-turbo-direct`, `gpt-4-turbo-direct`, `gpt-4o-direct`, `gpt-4o-plan`, `gpt-4o-code-plan`, `gpt-4.1-direct`, `gpt-4.1-plan`, `gpt-4.1-code-plan`, `gemma-7b`, `llama-8b`, `llama-70b`, `mistral-7b`, `baseline`
 - `--dataset`: `morehopqa` (1118 samples), `morehopqa-150` (150-sample subset)
 - `--strategy`: `zeroshot`, `zeroshot-cot`, `2-shot`, `2-shot-cot`, `3-shot`, `3-shot-cot`
 - `--max-samples N`: limit to the first N samples (testing only)
@@ -76,9 +76,15 @@ Each dataset entry contains a new generative question layered on top of an exist
 
 The `baseline` model only evaluates cases 1 and 2.
 
-### Plan-then-answer model (`gpt-4o-plan`)
+### Plan-then-answer model (`gpt-4o-plan`, `gpt-4.1-plan`)
 
 `models/openai_plan_model.py` makes two API calls per question: a planning call that asks the model to outline its reasoning steps without answering, then an answer call with the plan injected into the prompt. The cache gains a `<case_id>_plan` field alongside the usual prompt/answer fields.
+
+### Code-plan model (`gpt-4o-code-plan`, `gpt-4.1-code-plan`)
+
+`models/openai_code_plan_model.py` asks the model to write a Python function `answer_question()` that solves the question by calling back into the LLM via `llm.prompt()` for sub-tasks, then executes the generated code. The cache gains `<case_id>_plan`, `<case_id>_planner_prompt`, and `<case_id>_sub_calls` (a list of every `llm.prompt()` call made during execution).
+
+**Note:** gpt-4o performs poorly with both planning approaches — its built-in reasoning interferes with the structured planning format. Use `gpt-4.1` variants instead; gpt-4.1 follows the plan format faithfully and shows meaningfully better results. Planner evaluations should use `zeroshot` strategy only — few-shot examples anchor the model toward direct NL answers and undermine the planning approach.
 
 ### Adding a new model
 

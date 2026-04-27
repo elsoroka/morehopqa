@@ -2,7 +2,7 @@ import random
 random.seed(42)
 
 QUESTION_PROMPT = """
-Answer the following question:
+Answer the following question using the context:
 #QUESTION\n
 """
 

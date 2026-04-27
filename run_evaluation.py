@@ -74,10 +74,13 @@ def main():
     RESULT SUMMARY:
     - Total questions: {len(list(results.keys()))}
     - Correct answers in overall question: {[results[key]["case_1_em"] for key in results.keys()].count(True)}
-    - Avg precision (case_1): {sum(results[key]["case_1_precision"] for key in results) / len(results):.3f}
-    - Avg recall    (case_1): {sum(results[key]["case_1_recall"] for key in results) / len(results):.3f}
-    - Avg F1        (case_1): {sum(results[key]["case_1_f1"] for key in results) / len(results):.3f}
     """
+    for case_id in range(1,7):
+        output_str += f"""
+        - Avg precision (case_{case_id}): {sum(results[key][f"case_{case_id}_precision"] for key in results) / len(results):.3f}
+        - Avg recall    (case_{case_id}): {sum(results[key][f"case_{case_id}_recall"] for key in results) / len(results):.3f}
+        - Avg F1        (case_{case_id}): {sum(results[key][f"case_{case_id}_f1"] for key in results) / len(results):.3f}
+        """
 
     print(output_str)
 

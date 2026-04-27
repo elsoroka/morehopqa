@@ -118,7 +118,7 @@ class OpenAICodePlanModel(AbstractModel):
             raw, tok_in, tok_out = self._call(planner_prompt, max_tokens=512, system_prompt=None)
             plan_tokens_in += tok_in
             plan_tokens_out += tok_out
-            print("Raw plan:", raw)
+            #print("Raw plan:", raw)
 
             # Strip markdown code fences if present
             stripped = raw.strip()
@@ -151,7 +151,7 @@ class OpenAICodePlanModel(AbstractModel):
 
     def prompt(self, prompt: str) -> str:
         """Called from within exec'd plan code to invoke the LLM on a sub-task."""
-        response, tok_in, tok_out = self._call(prompt, max_tokens=512)
+        response, tok_in, tok_out = self._call(prompt, max_tokens=512, system_prompt=None)
         self._answer_tokens_in += tok_in
         self._answer_tokens_out += tok_out
         self._sub_calls.append({"prompt": prompt, "response": response,
@@ -180,12 +180,19 @@ class OpenAICodePlanModel(AbstractModel):
         total_plan_tokens_out = 0
         total_answer_tokens_in = 0
         total_answer_tokens_out = 0
-
+    
         for entry in tqdm(dataset.items(), total=dataset.length):
             cases = self.get_all_cases(entry)
-            print(entry.keys())
+            
             answer_entry = {"_id": entry["_id"], "context": entry["context"]}
-
+            correct_answers = {
+                "case_1": entry["answer"],
+                "case_2": entry["previous_answer"],
+                "case_3": entry["answer"],
+                "case_4": entry["answer"],
+                "case_5": entry["previous_answer"],
+                "case_6": entry["question_decomposition"][0]["answer"],
+            }
             for case_id, (prompt, question) in cases.items():
                 self._answer_tokens_in = 0
                 self._answer_tokens_out = 0
@@ -212,7 +219,7 @@ class OpenAICodePlanModel(AbstractModel):
                         "clean_answer": self.clean_answer,
                         "llm": self,
                         "question": question,
-                        "context": '\n\n'.join(entry["context"]),
+                        "context": '\n\n'.join({f"{c[0]}\n{' '.join(c[1])}" for c in entry["context"]}),
                     }
                     local_vars = {}
                     try:
@@ -222,14 +229,7 @@ class OpenAICodePlanModel(AbstractModel):
                         print(f"Exec error for {case_id}: {e}")
                         result = None
 
-                    correct_answer = {
-                        "case_1": entry["answer"],
-                        "case_2": entry["previous_answer"],
-                        "case_3": entry["answer"],
-                        "case_4": entry["answer"],
-                        "case_5": entry["previous_answer"],
-                        "case_6": entry["question_decomposition"][0]["answer"],
-                    }[case_id]
+                    correct_answer = correct_answers[case_id]
                     print("Result of execution:", result)
                     print("Correct answer:", correct_answer)
                     answer_entry[f"{case_id}_answer"] = result
