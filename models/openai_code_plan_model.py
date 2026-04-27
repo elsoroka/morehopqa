@@ -19,6 +19,7 @@ from openai import OpenAI
 import json
 from tqdm import tqdm
 import re
+from postprocess import extract_and_parse_date
 
 SYSTEM_PROMPT = """
 You are a question answering system. The user will ask you a question and you will provide an answer.
@@ -30,6 +31,7 @@ Write a concise step-by-step plan as a Python function `answer_question()->str:`
 * a large language model you can call with the function `llm.prompt(prompt:str)->str:`
 * a string variable `question` that contains the exact question you need to answer
 * a string variable`context` that contains the exact context you were provided to answer the question.
+* a function `clean_date(date_str:str)->datetime.date:` that will extract and parse a date string into a datetime.date object.
 * a function clean_answer(answer:str)->str: that will clean your final answer text and ensure it is wrapped in <answer> </answer> tags.
 * all built-in Python functions and libraries
 
@@ -39,7 +41,7 @@ Hints:
 * Do not assume llm.prompt() can return valid JSON.
 * Remember that the LLM will only see the prompt you write, so write your prompts carefully and include all necessary context to solve the step. You can use the `context` and `question` variables to help you write prompts for `llm.prompt()`.
 * Remember that llm.prompt() can only return text output, so if you need any other data type you must convert it yourself.
-* llm.prompt() may return text that already contains <answer> </answer> tags. Always strip them before using the value, and add them yourself only in the final return statement.
+* Use the `clean_date` and `clean_answer` functions to avoid errors.
 
 Example question: What is three days after the last date mentioned in the context?
 Example plan:
@@ -218,6 +220,7 @@ class OpenAICodePlanModel(AbstractModel):
                         "llm": self,
                         "question": question,
                         "context": '\n\n'.join({f"{c[0]}\n{' '.join(c[1])}" for c in entry["context"]}),
+                        'clean_date': extract_and_parse_date,
                     }
                     local_vars = {}
                     try:
