@@ -26,18 +26,22 @@ You are a question answering system. The user will ask you a question and you wi
 You can generate as much text as you want to get to the solution. Your final answer must be contained in two brackets: <answer> </answer>.
 """
 
+PLAN_CONTEXT_PREFIX = "Context:\n#CONTEXT\n\n"
+
+PLAN_QUESTION_PREFIX = "Question: #QUESTION\n\n"
+
 PLAN_SUFFIX = """
-Write a concise step-by-step plan as a Python function `answer_question()->str:` to answer the following question. You have access to the following:
+Write a concise step-by-step plan as a Python function `answer_question()->str:` to answer the above question. You have access to the following:
 * a large language model you can call with the function `llm.prompt(prompt:str)->str:`
 * a string variable `question` that contains the exact question you need to answer
-* a string variable`context` that contains the exact context you were provided to answer the question.
+* a string variable `context` that contains the exact context you were provided to answer the question.
 * a function `clean_date(date_str:str)->datetime.date:` that will extract and parse a date string into a datetime.date object.
-* a function clean_answer(answer:str)->str: that will clean your final answer text and ensure it is wrapped in <answer> </answer> tags.
+* a function `clean_answer(answer:str)->str:` that extracts and returns the answer text from <answer>...</answer> tags if present, or returns the stripped text as-is.
 * all built-in Python functions and libraries
 
 Hints:
 * Break the question into smaller steps.
-* Your plan must return the answer as a string wrapped in <answer> </answer> tags.
+* Your plan must return the final answer as a plain string (e.g. '42', '2020-03-15', 'yes').
 * Do not assume llm.prompt() can return valid JSON.
 * Remember that the LLM will only see the prompt you write, so write your prompts carefully and include all necessary context to solve the step. You can use the `context` and `question` variables to help you write prompts for `llm.prompt()`.
 * Remember that llm.prompt() can only return text output, so if you need any other data type you must convert it yourself.
@@ -48,24 +52,21 @@ Example plan:
 ```python
 def answer_question()->str:
     import datetime, re
-    def strip_answer_tags(text):
-        m = re.search(r'<answer>(.*?)</answer>', text, re.IGNORECASE | re.DOTALL)
-        return m.group(1).strip() if m else text.strip()
-    last_date_str = strip_answer_tags(llm.prompt(f"Find the last date mentioned in this text and return it as a string formatted as YYYY-MM-DD (ISO standard):\\nText:\\n{context}"))
+    last_date_str = clean_answer(llm.prompt(f"Find the last date mentioned in this text and return it as a string formatted as YYYY-MM-DD (ISO standard):\\nText:\\n{context}"))
     last_date = datetime.datetime.strptime(last_date_str, "%Y-%m-%d").date()
     three_days_after = last_date + datetime.timedelta(days=3)
-    return clean_answer(three_days_after.strftime('%Y-%m-%d'))
+    return three_days_after.strftime('%Y-%m-%d')
 ```
 Do not answer the question yourself — only output the plan as a Python code block.
 """
 
 END_OF_PROMPT = """
-If the answer is a date, your code should format it as a YYYY-MM-DD (ISO standard) string
-If the answer is a name, your code should format it as Firstname Lastname
-If the question is a yes or no question: your code should answer with 'yes' or 'no' (without quotes)
+If the answer is a date, your code should format it as a YYYY-MM-DD (ISO standard) string.
+If the answer is a name, your code should format it as Firstname Lastname.
+If the question is a yes or no question: your code should return 'yes' or 'no' (without quotes).
 If the answer contains any number, your code should format it as a string of digits.
 
-Your code should call the clean_answer function to ensure the answer does not contain extra formatting and is wrapped in <answer> </answer> tags.
+Your code should call the clean_answer function to strip any <answer> tags and extra formatting from the final answer string.
 """
 
 
@@ -102,7 +103,19 @@ class OpenAICodePlanModel(AbstractModel):
         usage = response.usage
         return response.choices[0].message.content, usage.prompt_tokens, usage.completion_tokens
 
-    def get_plan(self, base_prompt, max_tries=3):
+    def _build_plan_prompt(self, context, question):
+        """Build a plan-only prompt with no answer-format instructions."""
+        prompt = ""
+        if context is not None:
+            context_string = ""
+            for i, para in enumerate(context):
+                context_string += f"\n{i+1}: {para[0]}\n{' '.join(para[1])}"
+            prompt += PLAN_CONTEXT_PREFIX.replace("#CONTEXT", context_string)
+        prompt += PLAN_QUESTION_PREFIX.replace("#QUESTION", question)
+        prompt += PLAN_SUFFIX + END_OF_PROMPT
+        return prompt
+
+    def get_plan(self, context, question, max_tries=3):
         """First call: ask the model to write a Python plan."""
         error_message = None
         plan_tokens_in = 0
@@ -111,7 +124,7 @@ class OpenAICodePlanModel(AbstractModel):
         plan = None
 
         for _ in range(max_tries):
-            planner_prompt = base_prompt + PLAN_SUFFIX + END_OF_PROMPT
+            planner_prompt = self._build_plan_prompt(context, question)
             if error_message:
                 planner_prompt += f"\nError from previous attempt: {error_message}\nPlease fix the code and try again."
 
@@ -162,16 +175,16 @@ class OpenAICodePlanModel(AbstractModel):
         return self.prompt_generator.get_prompt(question_entry, context, question)
 
     def get_all_cases(self, entry):
-        """Return a dict mapping case_id -> (prompt, question) for all 6 cases."""
+        """Return a dict mapping case_id -> (context, question) for all 6 cases."""
         context = entry["context"]
         q = entry["question_decomposition"]
         return {
-            "case_1": (self.get_prompt(entry, context, entry["question"]),                entry["question"]),
-            "case_2": (self.get_prompt(entry, context, entry["previous_question"]),       entry["previous_question"]),
-            "case_3": (self.get_prompt(entry, context, entry["ques_on_last_hop"]),        entry["ques_on_last_hop"]),
-            "case_4": (self.get_prompt(entry, None,    q[2]["question"]),                 q[2]["question"]),
-            "case_5": (self.get_prompt(entry, context, q[1]["question"]),                 q[1]["question"]),
-            "case_6": (self.get_prompt(entry, context, q[0]["question"]),                 q[0]["question"]),
+            "case_1": (context, entry["question"]),
+            "case_2": (context, entry["previous_question"]),
+            "case_3": (context, entry["ques_on_last_hop"]),
+            "case_4": (None,    q[2]["question"]),
+            "case_5": (context, q[1]["question"]),
+            "case_6": (context, q[0]["question"]),
         }
 
     def get_answers_and_cache(self, dataset) -> dict:
@@ -193,16 +206,16 @@ class OpenAICodePlanModel(AbstractModel):
                 "case_5": entry["previous_answer"],
                 "case_6": entry["question_decomposition"][0]["answer"],
             }
-            for case_id, (prompt, question) in cases.items():
+            for case_id, (context, question) in cases.items():
                 self._answer_tokens_in = 0
                 self._answer_tokens_out = 0
                 self._sub_calls = []
 
-                plan, plan_tokens_in, plan_tokens_out, planner_prompt, valid_plan = self.get_plan(prompt)
+                plan, plan_tokens_in, plan_tokens_out, planner_prompt, valid_plan = self.get_plan(context, question)
                 total_plan_tokens_in += plan_tokens_in
                 total_plan_tokens_out += plan_tokens_out
 
-                answer_entry[f"{case_id}_prompt"] = prompt
+                answer_entry[f"{case_id}_prompt"] = planner_prompt
                 answer_entry[f"{case_id}_plan"] = plan
                 answer_entry[f"{case_id}_planner_prompt"] = planner_prompt
                 answer_entry[f"{case_id}_plan_tokens_in"] = plan_tokens_in
