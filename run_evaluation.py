@@ -3,6 +3,7 @@
 Format: python3 run_evaluation.py --model ... --dataset ... --fewshot-dataset ... --output_file_name ...
 """
 import argparse
+import os
 from dotenv import load_dotenv
 load_dotenv()
 from evaluate import evaluate_all, evaluate_baseline
@@ -73,12 +74,23 @@ def main():
     RESULT SUMMARY:
     - Total questions: {len(list(results.keys()))}
     - Correct answers in overall question: {[results[key]["case_1_em"] for key in results.keys()].count(True)}
-
+    - Avg precision (case_1): {sum(results[key]["case_1_precision"] for key in results) / len(results):.3f}
+    - Avg recall    (case_1): {sum(results[key]["case_1_recall"] for key in results) / len(results):.3f}
+    - Avg F1        (case_1): {sum(results[key]["case_1_f1"] for key in results) / len(results):.3f}
     """
 
     print(output_str)
 
-    with open(f"results/{args.output_file}_{args.model}_{args.strategy}_{args.dataset}_{datetime.now().strftime('%y%m%d-%H%M%S')}.jsonl", "w") as f:
+    output_file = f"results/{args.output_file}_{args.model}_{args.strategy}_{args.dataset}_{datetime.now().strftime('%y%m%d-%H%M%S')}.jsonl"
+    i = 1
+    original_output_file = output_file
+    while os.path.exists(output_file):
+        # don't overwrite
+        print("WARNING: File already exists. Will not overwrite.")
+        output_file = original_output_file + f"_{i}.jsonl"
+        i += 1
+    
+    with open(output_file, "w") as f:
         for entry_id, entry_results in results.items():
             f.write(json.dumps({"_id": entry_id, **entry_results}) + "\n")
 
