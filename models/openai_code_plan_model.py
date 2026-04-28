@@ -137,7 +137,7 @@ class OpenAICodePlanModel(AbstractModel):
             if error_message:
                 planner_prompt += f"\nError from previous attempt: {error_message}\nPlease fix the code and try again."
 
-            raw, tok_in, tok_out = self._call(planner_prompt, max_tokens=512, system_prompt=None)
+            raw, tok_in, tok_out = self._call(planner_prompt, max_tokens=2048, system_prompt=None)
             plan_tokens_in += tok_in
             plan_tokens_out += tok_out
             #print("Raw plan:", raw)
@@ -173,7 +173,7 @@ class OpenAICodePlanModel(AbstractModel):
 
     def prompt(self, prompt: str) -> str:
         """Called from within exec'd plan code to invoke the LLM on a sub-task."""
-        response, tok_in, tok_out = self._call(prompt, max_tokens=512, system_prompt=None)
+        response, tok_in, tok_out = self._call(prompt, max_tokens=2048, system_prompt=None)
         self._answer_tokens_in += tok_in
         self._answer_tokens_out += tok_out
         self._sub_calls.append({"prompt": prompt, "response": response,

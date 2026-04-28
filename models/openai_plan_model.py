@@ -97,12 +97,12 @@ class OpenAIPlanModel(AbstractModel):
     def get_plan(self, context, question):
         """First call: ask the model to plan, not answer."""
         plan_prompt = self._build_plan_prompt(context, question)
-        return self._call(plan_prompt, system=PLAN_SYSTEM_PROMPT, max_tokens=512)
+        return self._call(plan_prompt, system=PLAN_SYSTEM_PROMPT, max_tokens=2048)
 
     def get_answer(self, base_prompt, plan):
         """Second call: inject the plan and get the final answer."""
         augmented_prompt = base_prompt + PLAN_INJECTION.format(plan=plan) + END_OF_PROMPT
-        return self._call(augmented_prompt, max_tokens=256)
+        return self._call(augmented_prompt, max_tokens=2048)
 
     def get_prompt(self, question_entry, context, question):
         return self.prompt_generator.get_prompt(question_entry, context, question)
