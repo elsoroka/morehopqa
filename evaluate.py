@@ -69,14 +69,18 @@ def update_answer(metrics, prediction, gold):
     return em, prec, recall
 
 
-def evaluate(answer):
-    """Find correct answer. 
+def evaluate(answer, cases=None):
+    """Find correct answer.
     Should go in two steps:
     1. Check content between <answer> and </answer> tags.
     2. If not there, take last occurrence of the right entity.
     """
+    if cases is None:
+        cases = {f"case_{i}" for i in range(1, 7)}
     results = dict()
     for case_id in ["case_1", "case_2", "case_3", "case_4", "case_5", "case_6"]:
+        if case_id not in cases:
+            continue
         model_answer_text = answer[case_id + "_pred_extr"]
         ground_truth_answer_text = answer[case_id + "_ground_truth"]
         results[case_id + "_em"] = exact_match_score(model_answer_text, ground_truth_answer_text)
@@ -102,13 +106,13 @@ def evaluate_baseline(answers: dict):
     return res
 
 
-def evaluate_all(answers: dict):
+def evaluate_all(answers: dict, cases=None):
     """Evaluate all answers from the model and compare them to the ground truth."""
     res = dict()
     total_answers = 0
     for entry in tqdm(answers.values(), total=len(answers)):
         result_entry = deepcopy(entry)
         total_answers += 1
-        result_entry.update(evaluate(result_entry))
+        result_entry.update(evaluate(result_entry, cases=cases))
         res[result_entry["_id"]] = result_entry
     return res

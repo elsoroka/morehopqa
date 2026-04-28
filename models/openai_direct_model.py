@@ -43,6 +43,9 @@ class OpenAIDirectModel(AbstractModel):
             self.model = OpenAI()
         elif provider == "vllm":
             self.model = OpenAI(base_url="http://localhost:8000/v1", api_key="placeholder")
+        elif provider == "stanford":
+            import os
+            self.model = OpenAI(base_url="https://aiapi-prod.stanford.edu/v1", api_key=os.getenv("STANFORD_API_KEY"))
         else:
             raise ValueError(f"Invalid provider: {provider}")
         self.model_name = model_name
@@ -68,16 +71,19 @@ class OpenAIDirectModel(AbstractModel):
         return self.generate_text(prompt)
 
     def get_all_cases(self, entry):
-        cases = dict()
+        selected = getattr(self, 'cases', None)
         context = entry["context"]
-        cases["case_1"] = self.get_prompt(entry, context, entry['question'])
-        cases["case_2"] = self.get_prompt(entry, context, entry['previous_question'])
-        cases["case_3"] = self.get_prompt(entry, context, entry['ques_on_last_hop'])
-        cases["case_6"] = self.get_prompt(entry, context, entry['question_decomposition'][0]["question"])
-        cases["case_5"] = self.get_prompt(entry, context, entry['question_decomposition'][1]["question"])
-        cases["case_4"] = self.get_prompt(entry, None, entry['question_decomposition'][2]["question"])
-
-        return cases
+        all_cases = {
+            "case_1": self.get_prompt(entry, context, entry['question']),
+            "case_2": self.get_prompt(entry, context, entry['previous_question']),
+            "case_3": self.get_prompt(entry, context, entry['ques_on_last_hop']),
+            "case_4": self.get_prompt(entry, None, entry['question_decomposition'][2]["question"]),
+            "case_5": self.get_prompt(entry, context, entry['question_decomposition'][1]["question"]),
+            "case_6": self.get_prompt(entry, context, entry['question_decomposition'][0]["question"]),
+        }
+        if selected is None:
+            return all_cases
+        return {k: v for k, v in all_cases.items() if k in selected}
 
     def get_answers_and_cache(self, dataset):
         answers = dict()

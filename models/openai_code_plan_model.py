@@ -80,6 +80,9 @@ class OpenAICodePlanModel(AbstractModel):
             self.client = OpenAI()
         elif provider == "vllm":
             self.client = OpenAI(base_url="http://localhost:8000/v1", api_key="placeholder")
+        elif provider == "stanford":
+            import os
+            self.client = OpenAI(base_url="https://aiapi-prod.stanford.edu/v1", api_key=os.getenv("STANFORD_API_KEY"))
         else:
             raise ValueError(f"Invalid provider: {provider}")
         self.model_name = model_name
@@ -182,9 +185,10 @@ class OpenAICodePlanModel(AbstractModel):
 
     def get_all_cases(self, entry):
         """Return a dict mapping case_id -> (context, question) for all 6 cases."""
+        selected = getattr(self, 'cases', None)
         context = entry["context"]
         q = entry["question_decomposition"]
-        return {
+        all_cases = {
             "case_1": (context, entry["question"]),
             "case_2": (context, entry["previous_question"]),
             "case_3": (context, entry["ques_on_last_hop"]),
@@ -192,6 +196,9 @@ class OpenAICodePlanModel(AbstractModel):
             "case_5": (context, q[1]["question"]),
             "case_6": (context, q[0]["question"]),
         }
+        if selected is None:
+            return all_cases
+        return {k: v for k, v in all_cases.items() if k in selected}
 
     def get_answers_and_cache(self, dataset) -> dict:
         answers = dict()
@@ -204,7 +211,7 @@ class OpenAICodePlanModel(AbstractModel):
             cases = self.get_all_cases(entry)
             
             answer_entry = {"_id": entry["_id"], "context": entry["context"]}
-            correct_answers = {
+            all_correct_answers = {
                 "case_1": entry["answer"],
                 "case_2": entry["previous_answer"],
                 "case_3": entry["answer"],
@@ -212,6 +219,7 @@ class OpenAICodePlanModel(AbstractModel):
                 "case_5": entry["previous_answer"],
                 "case_6": entry["question_decomposition"][0]["answer"],
             }
+            correct_answers = {k: v for k, v in all_correct_answers.items() if k in cases}
             for case_id, (context, question) in cases.items():
                 self._answer_tokens_in = 0
                 self._answer_tokens_out = 0
@@ -245,6 +253,9 @@ class OpenAICodePlanModel(AbstractModel):
                     try:
                         exec(plan, exec_globals, local_vars)
                         result = local_vars.get("result")
+                        if callable(result):
+                            print(f"Exec produced a callable for {case_id}, treating as None")
+                            result = None
                     except Exception as e:
                         print(f"Exec error for {case_id}: {e}")
                         result = None
@@ -261,7 +272,7 @@ class OpenAICodePlanModel(AbstractModel):
 
             answers[entry["_id"]] = answer_entry
             with open(f"models/cached_answers/{self.output_file_name}", "w") as f:
-                json.dump(answers, f, indent=4)
+                json.dump(answers, f, indent=4, default=lambda o: f"<non-serializable: {type(o).__name__}>")
 
         total_in = total_plan_tokens_in + total_answer_tokens_in
         total_out = total_plan_tokens_out + total_answer_tokens_out

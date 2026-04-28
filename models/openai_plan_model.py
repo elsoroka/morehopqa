@@ -59,6 +59,9 @@ class OpenAIPlanModel(AbstractModel):
             self.client = OpenAI()
         elif provider == "vllm":
             self.client = OpenAI(base_url="http://localhost:8000/v1", api_key="placeholder")
+        elif provider == "stanford":
+            import os
+            self.client = OpenAI(base_url="https://aiapi-prod.stanford.edu/v1", api_key=os.getenv("STANFORD_API_KEY"))
         else:
             raise ValueError(f"Invalid provider: {provider}")
         self.model_name = model_name
@@ -107,8 +110,9 @@ class OpenAIPlanModel(AbstractModel):
     def get_all_cases(self, entry):
         """Return {case_id: (context, question)} for plan calls.
         The answer-call base_prompt is built separately via self.get_prompt()."""
+        selected = getattr(self, 'cases', None)
         context = entry["context"]
-        return {
+        all_cases = {
             "case_1": (context, entry["question"]),
             "case_2": (context, entry["previous_question"]),
             "case_3": (context, entry["ques_on_last_hop"]),
@@ -116,6 +120,9 @@ class OpenAIPlanModel(AbstractModel):
             "case_5": (context, entry["question_decomposition"][1]["question"]),
             "case_6": (context, entry["question_decomposition"][0]["question"]),
         }
+        if selected is None:
+            return all_cases
+        return {k: v for k, v in all_cases.items() if k in selected}
 
     def get_answers_and_cache(self, dataset) -> dict:
         answers = dict()

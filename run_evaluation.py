@@ -1,7 +1,15 @@
 """Run evaluation on dataset
 
-Format: python3 run_evaluation.py --model ... --mode ... --provider ... --dataset ... --strategy ...
+  # Run only case 1                                                                                                         
+  python3 run_evaluation.py --model gpt-4.1 --mode default --dataset morehopqa --strategy zeroshot --cases 1                
+                                                                                                                            
+  # Run cases 1 and 2                                                                                                       
+  python3 run_evaluation.py --model gpt-4.1 --mode default --dataset morehopqa --strategy zeroshot --cases 1 2              
+                                                                                                                            
+  # Run all (default behavior, unchanged)                                                                                   
+  python3 run_evaluation.py --model gpt-4.1 --mode default --dataset morehopqa --strategy zeroshot  
 """
+
 import argparse
 import os
 from dotenv import load_dotenv
@@ -35,6 +43,7 @@ def main():
     parser.add_argument('--strategy', type=str, help="Prompting strategy to use. Possible options: zeroshot, zeroshot-cot, 2-shot, 2-shot-cot, 3-shot, 3-shot-cot")
     parser.add_argument('--output_file', type=str, help='First part of the name of the output file. Will also include model, mode, strategy, dataset and timestamp. Default: output')
     parser.add_argument('--max-samples', type=int, default=None, help='Limit evaluation to the first N samples (useful for quick tests).')
+    parser.add_argument('--cases', nargs='+', default=['all'], help='Which cases to run: 1-6 or "all". E.g. --cases 1 3 5. Default: all.')
 
     args = parser.parse_args()
 
@@ -46,6 +55,24 @@ def main():
         print("For --dataset: " + ", ".join(DatasetLoader.registered_datasets))
         print("For --strategy: zeroshot, zeroshot-cot, 2-shot, 2-shot-cot, 3-shot, 3-shot-cot")
         sys.exit(1)
+
+    if args.cases == ['all']:
+        cases = {f"case_{i}" for i in range(1, 7)}
+    else:
+        cases = set()
+        for c in args.cases:
+            if c == 'all':
+                cases = {f"case_{i}" for i in range(1, 7)}
+                break
+            try:
+                n = int(c)
+                if n < 1 or n > 6:
+                    print(f"Invalid case number: {c}. Must be 1-6.")
+                    sys.exit(1)
+                cases.add(f"case_{n}")
+            except ValueError:
+                print(f"Invalid --cases value: {c}. Use integers 1-6 or 'all'.")
+                sys.exit(1)
 
     dataset = DatasetLoader.create(args.dataset)
     if args.max_samples is not None:
@@ -59,6 +86,7 @@ def main():
         prompt_generator=prompt_generator,
         mode=args.mode,
         provider=args.provider,
+        cases=cases,
     )
 
     print(f"Using model: {args.model}")
@@ -68,14 +96,15 @@ def main():
     print(f"Using dataset: {args.dataset}")
     print(f"Using few-shot dataset: {args.fewshot_dataset}")
     print(f"Using output file: {args.output_file}")
+    print(f"Running cases: {sorted(cases)}")
 
     answers = model.get_answers_and_cache(dataset)
     if args.model == "baseline":
         postprocessed = postprocess_all_baseline(answers, dataset)
         results = evaluate_baseline(postprocessed)
     else:
-        postprocessed = postprocess_all(answers, dataset)
-        results = evaluate_all(postprocessed)
+        postprocessed = postprocess_all(answers, dataset, cases=cases)
+        results = evaluate_all(postprocessed, cases=cases)
 
     # Sanitize model name for use in filename (replace / with -)
     model_slug = args.model.replace("/", "-")
@@ -87,12 +116,16 @@ def main():
     - Provider: {args.provider}
     - Dataset: {args.dataset}
     - Strategy: {args.strategy}
+    - Cases: {sorted(cases)}
 
     RESULT SUMMARY:
     - Total questions: {len(list(results.keys()))}
-    - Correct answers in overall question: {[results[key]["case_1_em"] for key in results.keys()].count(True)}
     """
-    for case_id in range(1,7):
+    if "case_1" in cases:
+        output_str += f"    - Correct answers in overall question: {[results[key]['case_1_em'] for key in results.keys()].count(True)}\n"
+    for case_id in range(1, 7):
+        if f"case_{case_id}" not in cases:
+            continue
         output_str += f"""
         - Avg precision (case_{case_id}): {sum(results[key][f"case_{case_id}_precision"] for key in results) / len(results):.3f}
         - Avg recall    (case_{case_id}): {sum(results[key][f"case_{case_id}_recall"] for key in results) / len(results):.3f}

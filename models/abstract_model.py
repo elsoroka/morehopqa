@@ -19,7 +19,7 @@ class AbstractModel(ABC):
         pass
 
     @staticmethod
-    def create(model_name, output_file_name, prompt_generator, mode="default", provider="openai"):
+    def create(model_name, output_file_name, prompt_generator, mode="default", provider="openai", cases=None):
         model_slug = model_name.replace("/", "-")
         stamped_output_file = f"{output_file_name}_{model_slug}_{mode}_{datetime.now().strftime('%y%m%d-%H%M%S')}.json"
 
@@ -51,9 +51,11 @@ class AbstractModel(ABC):
         else:
             raise ValueError(f"Unknown mode '{mode}'. Choose from: default, plan, code-plan.")
 
-        return cls(
+        instance = cls(
             model_name=model_name,
             output_file_name=stamped_output_file,
             prompt_generator=prompt_generator,
             provider=provider,
         )
+        instance.cases = cases if cases is not None else {f"case_{i}" for i in range(1, 7)}
+        return instance
