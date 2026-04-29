@@ -15,6 +15,7 @@ inspected later.
 """
 
 from models.abstract_model import AbstractModel
+from models.openai_plan_model import OpenAIPlanModel
 from openai import OpenAI
 import json
 from tqdm import tqdm
@@ -154,6 +155,11 @@ class OpenAICodePlanModel(AbstractModel):
 
     def _build_plan_prompt(self, context, question):
         """Build a plan-only prompt with no answer-format instructions."""
+        
+        if not hasattr(self, "nlp_plan"):
+            other_planner_model = OpenAIPlanModel(model_name=self.model_name, output_file_name=self.output_file_name, provider=self.provider, prompt_generator=self.prompt_generator)
+            self.nlp_plan = other_planner_model.get_plan(context, question)
+        
         prompt = ""
         if context is not None:
             context_string = ""
@@ -161,7 +167,7 @@ class OpenAICodePlanModel(AbstractModel):
                 context_string += f"\n{i+1}: {para[0]}\n{' '.join(para[1])}"
             prompt += PLAN_CONTEXT_PREFIX.replace("#CONTEXT", context_string)
         prompt += PLAN_QUESTION_PREFIX.replace("#QUESTION", question)
-        prompt += PLAN_SUFFIX + END_OF_PROMPT
+        prompt += PLAN_SUFFIX + f"Outline of your code:\n{self.nlp_plan}\n" + END_OF_PROMPT
         return prompt
 
     def get_plan(self, context, question, max_tries=3, prior_execution_error=None):
