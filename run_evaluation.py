@@ -44,7 +44,8 @@ def main():
     parser.add_argument('--output_file', type=str, help='First part of the name of the output file. Will also include model, mode, strategy, dataset and timestamp. Default: output')
     parser.add_argument('--max-samples', type=int, default=None, help='Limit evaluation to the first N samples (useful for quick tests).')
     parser.add_argument('--cases', nargs='+', default=['all'], help='Which cases to run: 1-6 or "all". E.g. --cases 1 3 5. Default: all.')
-
+    parser.add_argument('--max-exec-retries', type=int, default=3, help='Maximum number of execution retries for code-plan models. Default: 3.')
+    
     args = parser.parse_args()
 
     if args.model is None or args.dataset is None or args.strategy is None:
@@ -98,7 +99,7 @@ def main():
     print(f"Using output file: {args.output_file}")
     print(f"Running cases: {sorted(cases)}")
 
-    answers = model.get_answers_and_cache(dataset)
+    answers = model.get_answers_and_cache(dataset, max_exec_retries=args.max_exec_retries)
     if args.model == "baseline":
         postprocessed = postprocess_all_baseline(answers, dataset)
         results = evaluate_baseline(postprocessed)

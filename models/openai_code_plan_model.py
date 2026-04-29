@@ -19,6 +19,7 @@ from openai import OpenAI
 import json
 from tqdm import tqdm
 import re
+import datetime
 from postprocess import extract_and_parse_date
 
 SYSTEM_PROMPT = """
@@ -35,7 +36,7 @@ Write a concise step-by-step plan as a Python function `answer_question()->str:`
 * a large language model you can call with the function `llm.prompt(prompt:str)->str:`
 * a string variable `question` that contains the exact question you need to answer
 * a string variable `context` that contains the exact context you were provided to answer the question.
-* a function `clean_date(date_str:str)->datetime.date:` that will extract and parse a date string into a datetime.date object.
+* a function `clean_date(date_str:str)->datetime.datetime:` that will extract and parse a date string into a datetime.datetime object. Always use clean_date for date parsing — never use datetime.strptime(...).date() or other methods that return datetime.date, as mixing datetime.date and datetime.datetime causes errors.
 * a function `clean_answer(answer:str)->str:` that wraps text in <answer>...</answer> tags, normalizing any existing tags if present.
 * all built-in Python functions and libraries
 
@@ -45,7 +46,7 @@ Hints:
 * Do not assume llm.prompt() can return valid JSON.
 * Remember that the LLM will only see the prompt you write, so write your prompts carefully and include all necessary context to solve the step. You can use the `context` and `question` variables to help you write prompts for `llm.prompt()`.
 * Remember that llm.prompt() can only return text output, so if you need any other data type you must convert it yourself.
-* Use the `clean_date` and `clean_answer` functions to avoid errors.
+* Always use clean_date for date parsing. Never call .date() on the result — keep everything as datetime.datetime for arithmetic.
 
 Example question: What is three days after the last date mentioned in the context?
 Example plan:
@@ -57,7 +58,7 @@ def answer_question()->str:
         m = re.search(r'<answer>(.*?)</answer>', text, re.IGNORECASE | re.DOTALL)
         return m.group(1).strip() if m else text.strip()
     last_date_str = strip_tags(llm.prompt(f"Find the last date mentioned in this text and return it as a string formatted as YYYY-MM-DD (ISO standard):\\nText:\\n{context}"))
-    last_date = datetime.datetime.strptime(last_date_str, "%Y-%m-%d").date()
+    last_date = clean_date(last_date_str)
     three_days_after = last_date + datetime.timedelta(days=3)
     return clean_answer(three_days_after.strftime('%Y-%m-%d'))
 ```
@@ -72,6 +73,44 @@ If the answer contains any number, your code should format it as a string of dig
 
 Your code should call clean_answer on the final answer string to wrap it in <answer>...</answer> tags.
 """
+
+def _lint_plan(code: str) -> str | None:
+    """Return an error string if the plan fails structural checks, else None."""
+    import ast as _ast
+    try:
+        tree = _ast.parse(code)
+    except SyntaxError as e:
+        return str(e)
+    func_defs = {node.name: node for node in _ast.walk(tree) if isinstance(node, _ast.FunctionDef)}
+    if 'answer_question' not in func_defs:
+        return "Lint error: `answer_question` function is not defined"
+    fn = func_defs['answer_question']
+    if not any(isinstance(n, _ast.Return) and n.value is not None for n in _ast.walk(fn)):
+        return "Lint error: `answer_question` function has no return statement"
+    return None
+
+
+def safe_parse_int(s: str) -> int:
+    try:
+        return int(s)
+    except Exception:
+        pass
+    s = ''.join([c for c in s if c.isdigit() or c == '-'])
+    try:
+        return int(s)
+    except Exception:
+        return float('nan')
+
+def safe_parse_float(s: str) -> float:
+    try:
+        return float(s)
+    except Exception:
+        pass
+    s = ''.join([c for c in s if c.isdigit() or c == '.' or c == '-'])
+    try:
+        return float(s)
+    except Exception:
+        return float('nan')
 
 
 class OpenAICodePlanModel(AbstractModel):
@@ -125,7 +164,7 @@ class OpenAICodePlanModel(AbstractModel):
         prompt += PLAN_SUFFIX + END_OF_PROMPT
         return prompt
 
-    def get_plan(self, context, question, max_tries=3):
+    def get_plan(self, context, question, max_tries=3, prior_execution_error=None):
         """First call: ask the model to write a Python plan."""
         error_message = None
         plan_tokens_in = 0
@@ -135,8 +174,10 @@ class OpenAICodePlanModel(AbstractModel):
 
         for _ in range(max_tries):
             planner_prompt = self._build_plan_prompt(context, question)
+            if prior_execution_error:
+                planner_prompt += f"\nThe previous plan raised a runtime error during execution: {prior_execution_error}\nPlease rewrite the plan to fix this error."
             if error_message:
-                planner_prompt += f"\nError from previous attempt: {error_message}\nPlease fix the code and try again."
+                planner_prompt += f"\nSyntax error from previous attempt: {error_message}\nPlease fix the code and try again."
 
             raw, tok_in, tok_out = self._call(planner_prompt, max_tokens=2048, system_prompt=None)
             plan_tokens_in += tok_in
@@ -166,9 +207,14 @@ class OpenAICodePlanModel(AbstractModel):
 
             try:
                 compile(plan, "<string>", "exec")
-                return plan, plan_tokens_in, plan_tokens_out, planner_prompt, True
             except SyntaxError as e:
                 error_message = str(e)
+                continue
+            lint_error = _lint_plan(plan)
+            if lint_error:
+                error_message = lint_error
+                continue
+            return plan, plan_tokens_in, plan_tokens_out, planner_prompt, True
 
         return plan, plan_tokens_in, plan_tokens_out, planner_prompt, False
 
@@ -216,7 +262,7 @@ class OpenAICodePlanModel(AbstractModel):
             return all_cases
         return {k: v for k, v in all_cases.items() if k in selected}
 
-    def get_answers_and_cache(self, dataset) -> dict:
+    def get_answers_and_cache(self, dataset, max_exec_retries=3) -> dict:
         answers = dict()
         total_plan_tokens_in = 0
         total_plan_tokens_out = 0
@@ -241,21 +287,27 @@ class OpenAICodePlanModel(AbstractModel):
                 self._answer_tokens_out = 0
                 self._sub_calls = []
 
-                plan, plan_tokens_in, plan_tokens_out, planner_prompt, valid_plan = self.get_plan(context, question)
-                total_plan_tokens_in += plan_tokens_in
-                total_plan_tokens_out += plan_tokens_out
+                exec_error = None
+                result = None
+                plan = None
+                planner_prompt = None
+                valid_plan = False
+                case_plan_tokens_in = 0
+                case_plan_tokens_out = 0
 
-                answer_entry[f"{case_id}_prompt"] = planner_prompt
-                answer_entry[f"{case_id}_plan"] = plan
-                answer_entry[f"{case_id}_planner_prompt"] = planner_prompt
-                answer_entry[f"{case_id}_plan_tokens_in"] = plan_tokens_in
-                answer_entry[f"{case_id}_plan_tokens_out"] = plan_tokens_out
+                for exec_attempt in range(max_exec_retries):
+                    plan, plan_tokens_in, plan_tokens_out, planner_prompt, valid_plan = self.get_plan(
+                        context, question, prior_execution_error=exec_error
+                    )
+                    case_plan_tokens_in += plan_tokens_in
+                    case_plan_tokens_out += plan_tokens_out
+                    total_plan_tokens_in += plan_tokens_in
+                    total_plan_tokens_out += plan_tokens_out
 
-                if not valid_plan:
-                    answer_entry[f"{case_id}_answer"] = None
-                    answer_entry[f"{case_id}_answer_tokens_in"] = 0
-                    answer_entry[f"{case_id}_answer_tokens_out"] = 0
-                else:
+                    if not valid_plan:
+                        result = None
+                        break
+
                     # llm/question/context must be in the globals dict so they
                     # are visible inside nested functions defined by the plan.
                     exec_globals = {
@@ -264,6 +316,10 @@ class OpenAICodePlanModel(AbstractModel):
                         "question": question,
                         "context": '\n\n'.join({f"{c[0]}\n{' '.join(c[1])}" for c in entry["context"]}),
                         'clean_date': extract_and_parse_date,
+                        "int": safe_parse_int,
+                        "float": safe_parse_float,
+                        "datetime": datetime,
+                        "re": re,
                     }
                     local_vars = {}
                     try:
@@ -272,19 +328,23 @@ class OpenAICodePlanModel(AbstractModel):
                         if callable(result):
                             print(f"Exec produced a callable for {case_id}, treating as None")
                             result = None
+                        break  # success — stop retrying
                     except Exception as e:
-                        print(f"Exec error for {case_id}: {e}")
+                        exec_error = str(e)
+                        print(f"Exec error for {case_id} (attempt {exec_attempt + 1}/{max_exec_retries}): {e}")
                         result = None
 
-                    correct_answer = correct_answers[case_id]
-                    print("Result of execution:", result)
-                    print("Correct answer:", correct_answer)
-                    answer_entry[f"{case_id}_answer"] = result
-                    answer_entry[f"{case_id}_sub_calls"] = self._sub_calls
-                    answer_entry[f"{case_id}_answer_tokens_in"] = self._answer_tokens_in
-                    answer_entry[f"{case_id}_answer_tokens_out"] = self._answer_tokens_out
-                    total_answer_tokens_in += self._answer_tokens_in
-                    total_answer_tokens_out += self._answer_tokens_out
+                answer_entry[f"{case_id}_prompt"] = planner_prompt
+                answer_entry[f"{case_id}_plan"] = plan
+                answer_entry[f"{case_id}_planner_prompt"] = planner_prompt
+                answer_entry[f"{case_id}_plan_tokens_in"] = case_plan_tokens_in
+                answer_entry[f"{case_id}_plan_tokens_out"] = case_plan_tokens_out
+                answer_entry[f"{case_id}_answer"] = result
+                answer_entry[f"{case_id}_sub_calls"] = self._sub_calls
+                answer_entry[f"{case_id}_answer_tokens_in"] = self._answer_tokens_in
+                answer_entry[f"{case_id}_answer_tokens_out"] = self._answer_tokens_out
+                total_answer_tokens_in += self._answer_tokens_in
+                total_answer_tokens_out += self._answer_tokens_out
 
             answers[entry["_id"]] = answer_entry
             with open(f"models/cached_answers/{self.output_file_name}", "w") as f:
