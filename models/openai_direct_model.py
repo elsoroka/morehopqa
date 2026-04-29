@@ -6,6 +6,7 @@ This method is faster, but also more expensive.
 from models.abstract_model import AbstractModel
 from openai import OpenAI
 import json
+import re
 from datetime import datetime
 from tqdm import tqdm
 
@@ -52,7 +53,7 @@ class OpenAIDirectModel(AbstractModel):
         self.output_file_name =  output_file_name
         self.prompt_generator = prompt_generator
 
-    def generate_text(self, prompt, max_tokens=256):
+    def _call(self, prompt, max_tokens=256):
         response = self.model.chat.completions.create(
             model=self.model_name,
             messages=[
@@ -63,6 +64,22 @@ class OpenAIDirectModel(AbstractModel):
         )
         usage = response.usage
         return response.choices[0].message.content, usage.prompt_tokens, usage.completion_tokens
+
+    def generate_text(self, prompt, max_tokens=256):
+        """Call the model, retrying up to 3 times if <answer> tags are missing."""
+        tag_instruction = "\n\nEnclose your final answer in <answer>...</answer> tags."
+        current_prompt = prompt + tag_instruction
+        total_tok_in = total_tok_out = 0
+        response = None
+        for attempt in range(3):
+            response, tok_in, tok_out = self._call(current_prompt, max_tokens=max_tokens)
+            total_tok_in += tok_in
+            total_tok_out += tok_out
+            if re.search(r'<answer>.*?</answer>', response, re.IGNORECASE | re.DOTALL):
+                return response, total_tok_in, total_tok_out
+            current_prompt = (prompt + tag_instruction +
+                              f"\n\nAttempt {attempt + 1} failed: you must wrap your answer in <answer>...</answer> tags. Try again.")
+        return response, total_tok_in, total_tok_out
 
     def get_prompt(self, question_entry, context, question):
         return self.prompt_generator.get_prompt(question_entry, context, question)

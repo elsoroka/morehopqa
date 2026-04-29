@@ -87,6 +87,7 @@ class OpenAICodePlanModel(AbstractModel):
             raise ValueError(f"Invalid provider: {provider}")
         self.model_name = model_name
         self.output_file_name = output_file_name
+        self.provider = provider
         self.prompt_generator = prompt_generator
         # Per-case token counters and sub-call log, updated by self.prompt() during exec
         self._answer_tokens_in = 0
@@ -172,12 +173,27 @@ class OpenAICodePlanModel(AbstractModel):
         return plan, plan_tokens_in, plan_tokens_out, planner_prompt, False
 
     def prompt(self, prompt: str) -> str:
-        """Called from within exec'd plan code to invoke the LLM on a sub-task."""
-        response, tok_in, tok_out = self._call(prompt, max_tokens=2048, system_prompt=None)
-        self._answer_tokens_in += tok_in
-        self._answer_tokens_out += tok_out
-        self._sub_calls.append({"prompt": prompt, "response": response,
-                                 "tokens_in": tok_in, "tokens_out": tok_out})
+        """Called from within exec'd plan code to invoke the LLM on a sub-task.
+
+        Instructs the model to wrap its answer in <answer> tags and retries up
+        to 3 times if the tags are absent (helps small models that mix
+        reasoning with output).
+        """
+        tag_instruction = "\n\nEnclose your final answer in <answer>...</answer> tags."
+        current_prompt = prompt + tag_instruction
+        response = None
+        for attempt in range(3):
+            response, tok_in, tok_out = self._call(current_prompt, max_tokens=2048, system_prompt=None)
+            self._answer_tokens_in += tok_in
+            self._answer_tokens_out += tok_out
+            self._sub_calls.append({"prompt": current_prompt, "response": response,
+                                     "tokens_in": tok_in, "tokens_out": tok_out})
+            m = re.search(r'<answer>(.*?)</answer>', response, re.IGNORECASE | re.DOTALL)
+            if m:
+                return f"<answer>{m.group(1).strip()}</answer>"
+            current_prompt = (prompt + tag_instruction +
+                              f"\n\nAttempt {attempt + 1} failed: you must wrap your answer in <answer>...</answer> tags. Try again.")
+        # Fallback: return raw response so the plan can still try to use it
         return response
 
     def get_prompt(self, question_entry, context, question):
